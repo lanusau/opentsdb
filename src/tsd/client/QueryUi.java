@@ -128,7 +128,13 @@ public class QueryUi implements EntryPoint, HistoryListener {
    */
   private final EventsHandler refreshgraph = new EventsHandler() {
     protected <H extends EventHandler> void onEvent(final DomEvent<H> event) {
-      refreshGraph();
+//      refreshGraph();
+    	new Timer() {
+	@Override
+	  public void run() {
+  	    refreshGraph();
+	  }
+	}.schedule(250);   
     }
   };
 
