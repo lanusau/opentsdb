@@ -34,7 +34,7 @@ import net.opentsdb.utils.Config;
 /**
  * Main class of the TSD, the Time Series Daemon.
  */
-final class TSDMain {
+public final class TSDMain {
 
   /** Prints usage and exits with the given retval. */
   static void usage(final ArgP argp, final String errmsg, final int retval) {

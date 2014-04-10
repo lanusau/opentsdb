@@ -198,7 +198,7 @@ public abstract class StatsCollector {
    * If set to true, the tag changes to "fqdn" instead of "host" 
    */
   public final void addHostTag(final boolean canonical) {
-    try {
+   /* try {
       if (canonical) {
         addExtraTag("fqdn", InetAddress.getLocalHost().getCanonicalHostName());
       } else {
@@ -207,7 +207,7 @@ public abstract class StatsCollector {
     } catch (UnknownHostException x) {
       LOG.error("WTF?  Can't find hostname for localhost!", x);
       addExtraTag("host", "(unknown)");
-    }
+    }*/
   }
 
   /**
