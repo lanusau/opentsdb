@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env bash
 # Generates BuildData.java
 # Usage: gen_build_data.sh path/to/BuildData.java my.package.name
 # Author: Benoit Sigoure (tsuna@stumbleupon.com)
@@ -31,8 +31,8 @@ export TZ
 sh=`python <<EOF
 import time
 t = time.time();
-print "timestamp=%d" % t;
-print "date=%r" % time.strftime("%Y/%m/%d %T %z", time.gmtime(t))
+print ("timestamp=%d" % t);
+print ("date=%r" % time.strftime("%Y/%m/%d %T %z", time.gmtime(t)))
 EOF`
 eval "$sh"  # Sets the timestamp and date variables.
 

@@ -29,12 +29,12 @@ import org.hbase.async.HBaseException;
 import org.hbase.async.KeyValue;
 import org.hbase.async.Scanner;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.stumbleupon.async.Callback;
 import com.stumbleupon.async.Deferred;
 
 import static org.hbase.async.Bytes.ByteMap;
 import net.opentsdb.stats.Histogram;
-import net.opentsdb.uid.NoSuchUniqueId;
 import net.opentsdb.uid.NoSuchUniqueName;
 import net.opentsdb.uid.UniqueId;
 
@@ -111,12 +111,12 @@ final class TsdbQuery implements Query {
 
   /**
    * Downsampling function to use, if any (can be {@code null}).
-   * If this is non-null, {@code sample_interval} must be strictly positive.
+   * If this is non-null, {@code sample_interval_ms} must be strictly positive.
    */
   private Aggregator downsampler;
 
-  /** Minimum time interval (in seconds) wanted between each data point. */
-  private long sample_interval;
+  /** Minimum time interval (in milliseconds) wanted between each data point. */
+  private long sample_interval_ms;
 
   /** Optional list of TSUIDs to fetch and aggregate instead of a metric */
   private List<String> tsuids;
@@ -132,6 +132,7 @@ final class TsdbQuery implements Query {
    * @throws IllegalArgumentException if the timestamp is invalid or greater
    * than the end time (if set)
    */
+  @Override
   public void setStartTime(final long timestamp) {
     if (timestamp < 0 || ((timestamp & Const.SECOND_MASK) != 0 && 
         timestamp > 9999999999999L)) {
@@ -144,9 +145,10 @@ final class TsdbQuery implements Query {
   }
 
   /**
-   * @returns the start time for the query
+   * @return the start time for the query
    * @throws IllegalStateException if the start time hasn't been set yet
    */
+  @Override
   public long getStartTime() {
     if (start_time == UNSET) {
       throw new IllegalStateException("setStartTime was never called!");
@@ -161,6 +163,7 @@ final class TsdbQuery implements Query {
    * @throws IllegalArgumentException if the timestamp is invalid or less
    * than the start time (if set)
    */
+  @Override
   public void setEndTime(final long timestamp) {
     if (timestamp < 0 || ((timestamp & Const.SECOND_MASK) != 0 && 
         timestamp > 9999999999999L)) {
@@ -175,6 +178,7 @@ final class TsdbQuery implements Query {
   /** @return the configured end time. If the end time hasn't been set, the
    * current system time will be stored and returned.
    */
+  @Override
   public long getEndTime() {
     if (end_time == UNSET) {
       setEndTime(System.currentTimeMillis());
@@ -182,6 +186,7 @@ final class TsdbQuery implements Query {
     return end_time;
   }
 
+  @Override
   public void setTimeSeries(final String metric,
       final Map<String, String> tags,
       final Aggregator function,
@@ -189,6 +194,7 @@ final class TsdbQuery implements Query {
     setTimeSeries(metric, tags, function, rate, new RateOptions());
   }
   
+  @Override
   public void setTimeSeries(final String metric,
         final Map<String, String> tags,
         final Aggregator function,
@@ -203,11 +209,13 @@ final class TsdbQuery implements Query {
     this.rate_options = rate_options;
   }
 
+  @Override
   public void setTimeSeries(final List<String> tsuids,
       final Aggregator function, final boolean rate) {
     setTimeSeries(tsuids, function, rate, new RateOptions());
   }
   
+  @Override
   public void setTimeSeries(final List<String> tsuids,
       final Aggregator function, final boolean rate, 
       final RateOptions rate_options) {
@@ -246,6 +254,7 @@ final class TsdbQuery implements Query {
    * @throws NullPointerException if the aggregation function is null
    * @throws IllegalArgumentException if the interval is not greater than 0
    */
+  @Override
   public void downsample(final long interval, final Aggregator downsampler) {
     if (downsampler == null) {
       throw new NullPointerException("downsampler");
@@ -253,7 +262,7 @@ final class TsdbQuery implements Query {
       throw new IllegalArgumentException("interval not > 0: " + interval);
     }
     this.downsampler = downsampler;
-    this.sample_interval = interval;
+    this.sample_interval_ms = interval;
   }
 
   /**
@@ -309,6 +318,7 @@ final class TsdbQuery implements Query {
    * Executes the query
    * @return An array of data points with one time series per array value
    */
+  @Override
   public DataPoints[] run() throws HBaseException {
     try {
       return runAsync().joinUninterruptibly();
@@ -319,6 +329,7 @@ final class TsdbQuery implements Query {
     }
   }
   
+  @Override
   public Deferred<DataPoints[]> runAsync() throws HBaseException {
     return findSpans().addCallback(new GroupByAndAggregateCB());
   }
@@ -332,7 +343,7 @@ final class TsdbQuery implements Query {
    * stored in the map has its timestamp zero'ed out.
    * @throws HBaseException if there was a problem communicating with HBase to
    * perform the search.
-   * @throws IllegalArgumentException if bad data was retreived from HBase.
+   * @throws IllegalArgumentException if bad data was retrieved from HBase.
    */
   private Deferred<TreeMap<byte[], Span>> findSpans() throws HBaseException {
     final short metric_width = tsdb.metrics.width();
@@ -353,6 +364,7 @@ final class TsdbQuery implements Query {
       ArrayList<ArrayList<KeyValue>>> {
       
       int nrows = 0;
+      boolean seenAnnotation = false;
       int hbase_time = 0; // milliseconds.
       long starttime = System.nanoTime();
       
@@ -382,7 +394,7 @@ final class TsdbQuery implements Query {
              scanlatency.add(hbase_time);
              LOG.info(TsdbQuery.this + " matched " + nrows + " rows in " +
                  spans.size() + " spans in " + hbase_time + "ms");
-             if (nrows < 1) {
+             if (nrows < 1 && !seenAnnotation) {
                results.callback(null);
              } else {
                results.callback(spans);
@@ -407,12 +419,13 @@ final class TsdbQuery implements Query {
              }
              final KeyValue compacted = 
                tsdb.compact(row, datapoints.getAnnotations());
+             seenAnnotation |= !datapoints.getAnnotations().isEmpty();
              if (compacted != null) { // Can be null if we ignored all KVs.
                datapoints.addRow(compacted);
                nrows++;
              }
            }
-           
+
            return scan();
          } catch (Exception e) {
            scanner.close();
@@ -440,6 +453,7 @@ final class TsdbQuery implements Query {
     * @return A possibly empty array of {@link SpanGroup}s built according to
     * any 'GROUP BY' formulated in this query.
     */
+    @Override
     public DataPoints[] call(final TreeMap<byte[], Span> spans) throws Exception {
       if (spans == null || spans.size() <= 0) {
         return NO_RESULT;
@@ -448,12 +462,12 @@ final class TsdbQuery implements Query {
         // We haven't been asked to find groups, so let's put all the spans
         // together in the same group.
         final SpanGroup group = new SpanGroup(tsdb,
-                                              getScanStartTime(),
-                                              getScanEndTime(),
+                                              getScanStartTimeSeconds(),
+                                              getScanEndTimeSeconds(),
                                               spans.values(),
                                               rate, rate_options,
                                               aggregator,
-                                              sample_interval, downsampler);
+                                              sample_interval_ms, downsampler);
         return new SpanGroup[] { group };
       }
   
@@ -494,9 +508,10 @@ final class TsdbQuery implements Query {
         //LOG.info("Span belongs to group " + Arrays.toString(group) + ": " + Arrays.toString(row));
         SpanGroup thegroup = groups.get(group);
         if (thegroup == null) {
-          thegroup = new SpanGroup(tsdb, getScanStartTime(), getScanEndTime(),
+          thegroup = new SpanGroup(tsdb, getScanStartTimeSeconds(),
+                                   getScanEndTimeSeconds(),
                                    null, rate, rate_options, aggregator,
-                                   sample_interval, downsampler);
+                                   sample_interval_ms, downsampler);
           // Copy the array because we're going to keep `group' and overwrite
           // its contents. So we want the collection to have an immutable copy.
           final byte[] group_copy = new byte[group.length];
@@ -530,10 +545,10 @@ final class TsdbQuery implements Query {
     // rely on having a few extra data points before & after the exact start
     // & end dates in order to do proper rate calculation or downsampling near
     // the "edges" of the graph.
-    Bytes.setInt(start_row, (int) getScanStartTime(), metric_width);
+    Bytes.setInt(start_row, (int) getScanStartTimeSeconds(), metric_width);
     Bytes.setInt(end_row, (end_time == UNSET
                            ? -1  // Will scan until the end (0xFFF...).
-                           : (int) getScanEndTime()),
+                           : (int) getScanEndTimeSeconds()),
                  metric_width);
     
     // set the metric UID based on the TSUIDs if given, or the metric UID
@@ -561,7 +576,7 @@ final class TsdbQuery implements Query {
   }
 
   /** Returns the UNIX timestamp from which we must start scanning.  */
-  private long getScanStartTime() {
+  private long getScanStartTimeSeconds() {
     // The reason we look before by `MAX_TIMESPAN * 2' seconds is because of
     // the following.  Let's assume MAX_TIMESPAN = 600 (10 minutes) and the
     // start_time = ... 12:31:00.  If we initialize the scanner to look
@@ -572,32 +587,32 @@ final class TsdbQuery implements Query {
     // look back by twice MAX_TIMESPAN.  Only when start_time is aligned on a
     // MAX_TIMESPAN boundary then we'll mistakenly scan back by an extra row,
     // but this doesn't really matter.
-    // Additionally, in case our sample_interval is large, we need to look
+    // Additionally, in case our sample_interval_ms is large, we need to look
     // even further before/after, so use that too.
     long start = getStartTime();
     // down cast to seconds if we have a query in ms
     if ((start & Const.SECOND_MASK) != 0) {
       start /= 1000;
     }
-    final long ts = start - Const.MAX_TIMESPAN * 2 - sample_interval;
+    final long ts = start - Const.MAX_TIMESPAN * 2 - sample_interval_ms / 1000;
     return ts > 0 ? ts : 0;
   }
 
   /** Returns the UNIX timestamp at which we must stop scanning.  */
-  private long getScanEndTime() {
+  private long getScanEndTimeSeconds() {
     // For the end_time, we have a different problem.  For instance if our
     // end_time = ... 12:30:00, we'll stop scanning when we get to 12:40, but
     // once again we wanna try to look ahead one more row, so to avoid this
     // problem we always add 1 second to the end_time.  Only when the end_time
     // is of the form HH:59:59 then we will scan ahead an extra row, but once
     // again that doesn't really matter.
-    // Additionally, in case our sample_interval is large, we need to look
+    // Additionally, in case our sample_interval_ms is large, we need to look
     // even further before/after, so use that too.
     long end = getEndTime();
     if ((end & Const.SECOND_MASK) != 0) {
       end /= 1000;
     }
-    return end + Const.MAX_TIMESPAN + 1 + sample_interval;
+    return end + Const.MAX_TIMESPAN + 1 + sample_interval_ms / 1000;
   }
 
   /**
@@ -761,61 +776,49 @@ final class TsdbQuery implements Query {
     buf.append("\\E");
   }
 
+  @Override
   public String toString() {
     final StringBuilder buf = new StringBuilder();
     buf.append("TsdbQuery(start_time=")
        .append(getStartTime())
        .append(", end_time=")
        .append(getEndTime());
-   if (tsuids != null && !tsuids.isEmpty()) {
-     buf.append(", tsuids=");
-     for (final String tsuid : tsuids) {
-       buf.append(tsuid).append(",");
-     }
-   } else {
+    if (tsuids != null && !tsuids.isEmpty()) {
+      buf.append(", tsuids=");
+      for (final String tsuid : tsuids) {
+        buf.append(tsuid).append(",");
+      }
+    } else {
       buf.append(", metric=").append(Arrays.toString(metric));
-      try {
-        buf.append(" (").append(tsdb.metrics.getName(metric));
-      } catch (NoSuchUniqueId e) {
-        buf.append(" (<").append(e.getMessage()).append('>');
-      }
-      try {
-        buf.append("), tags=").append(Tags.resolveIds(tsdb, tags));
-      } catch (NoSuchUniqueId e) {
-        buf.append("), tags=<").append(e.getMessage()).append('>');
-      }
-    }
-    buf.append(", rate=").append(rate)
-       .append(", aggregator=").append(aggregator)
-       .append(", group_bys=(");
-    if (group_bys != null) {
-      for (final byte[] tag_id : group_bys) {
-        try {
-          buf.append(tsdb.tag_names.getName(tag_id));
-        } catch (NoSuchUniqueId e) {
-          buf.append('<').append(e.getMessage()).append('>');
+      buf.append(", tags=[");
+      for (final Iterator<byte[]> it = tags.iterator(); it.hasNext(); ) {
+        buf.append(Arrays.toString(it.next()));
+        if (it.hasNext()) {
+          buf.append(',');
         }
-        buf.append(' ')
-           .append(Arrays.toString(tag_id));
-        if (group_by_values != null) {
-          final byte[][] value_ids = group_by_values.get(tag_id);
-          if (value_ids == null) {
-            continue;
-          }
-          buf.append("={");
-          for (final byte[] value_id : value_ids) {
-            try {
-              buf.append(tsdb.tag_values.getName(value_id));
-            } catch (NoSuchUniqueId e) {
-              buf.append('<').append(e.getMessage()).append('>');
+      }
+      buf.append("], rate=").append(rate)
+        .append(", aggregator=").append(aggregator)
+        .append(", group_bys=(");
+      if (group_bys != null) {
+        for (final byte[] tag_id : group_bys) {
+          buf.append(Arrays.toString(tag_id));
+          if (group_by_values != null) {
+            final byte[][] value_ids = group_by_values.get(tag_id);
+            if (value_ids == null) {
+              continue;
             }
-            buf.append(' ')
-               .append(Arrays.toString(value_id))
-               .append(", ");
+            buf.append("={");
+            for (int i = 0; i < value_ids.length; i++) {
+              buf.append(Arrays.toString(value_ids[i]));
+              if (i < value_ids.length - 1) {
+                buf.append(',');
+              }
+            }
+            buf.append('}');
           }
-          buf.append('}');
+          buf.append(", ");
         }
-        buf.append(", ");
       }
     }
     buf.append("))");
@@ -833,6 +836,7 @@ final class TsdbQuery implements Query {
       this.metric_width = metric_width;
     }
 
+    @Override
     public int compare(final byte[] a, final byte[] b) {
       final int length = Math.min(a.length, b.length);
       if (a == b) {  // Do this after accessing a.length and b.length
@@ -856,4 +860,23 @@ final class TsdbQuery implements Query {
 
   }
 
+  /** Helps unit tests inspect private methods. */
+  @VisibleForTesting
+  static class ForTesting {
+
+    /** @return the start time of the HBase scan for unit tests. */
+    static long getScanStartTimeSeconds(TsdbQuery query) {
+      return query.getScanStartTimeSeconds();
+    }
+
+    /** @return the end time of the HBase scan for unit tests. */
+    static long getScanEndTimeSeconds(TsdbQuery query) {
+      return query.getScanEndTimeSeconds();
+    }
+
+    /** @return the downsampling interval for unit tests. */
+    static long getDownsampleIntervalMs(TsdbQuery query) {
+      return query.sample_interval_ms;
+    }
+  }
 }

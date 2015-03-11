@@ -29,7 +29,7 @@ import com.stumbleupon.async.Deferred;
  * meta data or other types of information as changes are made.
  * <p>
  * <b>Note:</b> Implementations must have a parameterless constructor. The 
- * {@link #initialize()} method will be called immediately after the plugin is
+ * {@link #initialize(TSDB)} method will be called immediately after the plugin is
  * instantiated and before any other methods are called.
  * <p>
  * <b>Warning:</b> All processing should be performed asynchronously and return
@@ -97,7 +97,7 @@ public abstract class RTPublisher {
   public final Deferred<Object> sinkDataPoint(final String metric, 
       final long timestamp, final byte[] value, final Map<String, String> tags, 
       final byte[] tsuid, final short flags) {
-    if ((flags & Const.FLAG_FLOAT) == 0x0) {
+    if ((flags & Const.FLAG_FLOAT) != 0x0) {
       return publishDataPoint(metric, timestamp, 
           Internal.extractFloatingPointValue(value, 0, (byte) flags), 
           tags, tsuid);

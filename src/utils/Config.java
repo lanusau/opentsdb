@@ -31,16 +31,16 @@ import com.google.common.collect.ImmutableMap;
  * 
  * This handles all of the user configurable variables for a TSD. On
  * initialization default values are configured for all variables. Then
- * implementations should call the {@link loadConfig()} methods to search for a
+ * implementations should call the {@link #loadConfig()} methods to search for a
  * default configuration or try to load one provided by the user.
  * 
- * To add a configuration, simply set a default value in {@link setDefaults).
+ * To add a configuration, simply set a default value in {@link #setDefaults()}.
  * Wherever you need to access the config value, use the proper helper to fetch
  * the value, accounting for exceptions that may be thrown if necessary.
  * 
  * The get<type> number helpers will return NumberFormatExceptions if the
- * requested property is null or unparseable. The {@link getString()} helper
- * will return a NullPointerException if the property isn't found.
+ * requested property is null or unparseable. The {@link #getString(String)} 
+ * helper will return a NullPointerException if the property isn't found.
  * <p>
  * Plugins can extend this class and copy the properties from the main
  * TSDB.config instance. Plugins should never change the main TSD's config
@@ -64,9 +64,15 @@ public class Config {
   /** tsd.core.auto_create_metrics */
   private boolean auto_metric = false;
 
+  /** tsd.core.auto_create_tagk */
+  private boolean auto_tagk = true;
+  
+  /** tsd.core.auto_create_tagv */
+  private boolean auto_tagv = true;
+  
   /** tsd.storage.enable_compaction */
   private boolean enable_compactions = true;
-  
+
   /** tsd.core.meta.enable_realtime_ts */
   private boolean enable_realtime_ts = false;
   
@@ -81,7 +87,10 @@ public class Config {
   
   /** tsd.http.request.enable_chunked */
   private boolean enable_chunked_requests = false;
-  
+
+  /** tsd.storage.fix_duplicates */
+  private boolean fix_duplicates = false;
+
   /** tsd.http.request.max_chunk */
   private int max_chunked_requests = 4096; 
   
@@ -99,7 +108,7 @@ public class Config {
     new HashMap<String, String>();
   
   /** Tracks the location of the file that was actually loaded */
-  private String config_location;
+  protected String config_location;
 
   /**
    * Constructor that initializes default configuration values. May attempt to
@@ -110,9 +119,10 @@ public class Config {
    *           config files
    */
   public Config(final boolean auto_load_config) throws IOException {
-    if (auto_load_config)
-      this.loadConfig();
-    this.setDefaults();
+    if (auto_load_config) {
+      loadConfig();
+    }
+    setDefaults();
   }
 
   /**
@@ -122,8 +132,8 @@ public class Config {
    * @throws IOException Thrown if unable to read or parse the file
    */
   public Config(final String file) throws IOException {
-    this.loadConfig(file);
-    this.setDefaults();
+    loadConfig(file);
+    setDefaults();
   }
 
   /**
@@ -136,24 +146,36 @@ public class Config {
    */
   public Config(final Config parent) {
     // copy so changes to the local props by the plugin don't affect the master
-    this.properties.putAll(parent.properties);
-    this.config_location = parent.config_location;
-    this.setDefaults();
+    properties.putAll(parent.properties);
+    config_location = parent.config_location;
+    setDefaults();
   }
 
   /** @return the auto_metric value */
   public boolean auto_metric() {
-    return this.auto_metric;
+    return auto_metric;
   }
   
-  /** @param set whether or not to auto create metrics */
+  /** @return the auto_tagk value */
+  public boolean auto_tagk() {
+    return auto_tagk;
+  }
+  
+  /** @return the auto_tagv value */
+  public boolean auto_tagv() {
+    return auto_tagv;
+  }
+  
+  /** @param auto_metric whether or not to auto create metrics */
   public void setAutoMetric(boolean auto_metric) {
     this.auto_metric = auto_metric;
+    properties.put("tsd.core.auto_create_metrics", 
+        Boolean.toString(auto_metric));
   }
   
   /** @return the enable_compaction value */
   public boolean enable_compactions() {
-    return this.enable_compactions;
+    return enable_compactions;
   }
   
   /** @return whether or not to record new TSMeta objects in real time */
@@ -178,30 +200,42 @@ public class Config {
   
   /** @return whether or not chunked requests are supported */
   public boolean enable_chunked_requests() {
-    return this.enable_chunked_requests;
+    return enable_chunked_requests;
   }
   
   /** @return max incoming chunk size in bytes */
   public int max_chunked_requests() {
-    return this.max_chunked_requests;
+    return max_chunked_requests;
   }
-  
+
+  /** @return true if duplicate values should be fixed */
+  public boolean fix_duplicates() {
+    return fix_duplicates;
+  }
+
+  /** @param fix_duplicates true if duplicate values should be fixed */
+  public void setFixDuplicates(final boolean fix_duplicates) {
+    this.fix_duplicates = fix_duplicates;
+  }
+
   /** @return whether or not to process new or updated TSMetas through trees */
   public boolean enable_tree_processing() {
     return enable_tree_processing;
   }
   
   /**
-   * Allows for modifying properties after loading
+   * Allows for modifying properties after creation or loading.
    * 
-   * @warn This should only be used on initialization and is meant for command
-   *       line overrides
+   * WARNING: This should only be used on initialization and is meant for 
+   * command line overrides. Also note that it will reset all static config 
+   * variables when called.
    * 
    * @param property The name of the property to override
    * @param value The value to store
    */
   public void overrideConfig(final String property, final String value) {
-    this.properties.put(property, value);
+    properties.put(property, value);
+    loadStaticVariables();
   }
 
   /**
@@ -211,7 +245,7 @@ public class Config {
    * @throws NullPointerException if the property did not exist
    */
   public final String getString(final String property) {
-    return this.properties.get(property);
+    return properties.get(property);
   }
 
   /**
@@ -222,7 +256,7 @@ public class Config {
    * @throws NullPointerException if the property did not exist
    */
   public final int getInt(final String property) {
-    return Integer.parseInt(this.properties.get(property));
+    return Integer.parseInt(properties.get(property));
   }
 
   /**
@@ -233,7 +267,7 @@ public class Config {
    * @throws NullPointerException if the property did not exist
    */
   public final short getShort(final String property) {
-    return Short.parseShort(this.properties.get(property));
+    return Short.parseShort(properties.get(property));
   }
 
   /**
@@ -244,7 +278,7 @@ public class Config {
    * @throws NullPointerException if the property did not exist
    */
   public final long getLong(final String property) {
-    return Long.parseLong(this.properties.get(property));
+    return Long.parseLong(properties.get(property));
   }
 
   /**
@@ -255,7 +289,7 @@ public class Config {
    * @throws NullPointerException if the property did not exist
    */
   public final float getFloat(final String property) {
-    return Float.parseFloat(this.properties.get(property));
+    return Float.parseFloat(properties.get(property));
   }
 
   /**
@@ -266,7 +300,7 @@ public class Config {
    * @throws NullPointerException if the property did not exist
    */
   public final double getDouble(final String property) {
-    return Double.parseDouble(this.properties.get(property));
+    return Double.parseDouble(properties.get(property));
   }
 
   /**
@@ -282,7 +316,7 @@ public class Config {
    * @throws NullPointerException if the property was not found
    */
   public final boolean getBoolean(final String property) {
-    final String val = this.properties.get(property).toUpperCase();
+    final String val = properties.get(property).toUpperCase();
     if (val.equals("1"))
       return true;
     if (val.equals("TRUE"))
@@ -295,8 +329,8 @@ public class Config {
   /**
    * Returns the directory name, making sure the end is an OS dependent slash
    * @param property The property to load
-   * @return The property value with a forward or back slash appended
-   * @throws NullPointerException if the property was not found
+   * @return The property value with a forward or back slash appended or null
+   * if the property wasn't found or the directory was empty.
    */
   public final String getDirectoryName(final String property) {
     String directory = properties.get(property);
@@ -316,6 +350,11 @@ public class Config {
       throw new IllegalArgumentException(
           "Unix path names cannot contain a back slash");
     }
+    
+    if (directory == null || directory.isEmpty()){
+    	return null;
+    }
+    
     if (directory.charAt(directory.length() - 1) == '/') {
       return directory;
     }
@@ -328,7 +367,7 @@ public class Config {
    * @return True if the property exists and has a value, not an empty string
    */
   public final boolean hasProperty(final String property) {
-    final String val = this.properties.get(property);
+    final String val = properties.get(property);
     if (val == null)
       return false;
     if (val.isEmpty())
@@ -341,13 +380,13 @@ public class Config {
    * @return A string with information about the config
    */
   public final String dumpConfiguration() {
-    if (this.properties.isEmpty())
+    if (properties.isEmpty())
       return "No configuration settings stored";
 
     StringBuilder response = new StringBuilder("TSD Configuration:\n");
-    response.append("File [" + this.config_location + "]\n");
+    response.append("File [" + config_location + "]\n");
     int line = 0;
-    for (Map.Entry<String, String> entry : this.properties.entrySet()) {
+    for (Map.Entry<String, String> entry : properties.entrySet()) {
       if (line > 0) {
         response.append("\n");
       }
@@ -377,6 +416,8 @@ public class Config {
     // map.put("tsd.network.port", ""); // does not have a default, required
     // map.put("tsd.http.cachedir", ""); // does not have a default, required
     // map.put("tsd.http.staticroot", ""); // does not have a default, required
+    default_map.put("tsd.mode", "rw");
+    default_map.put("tsd.no_diediedie", "false");
     default_map.put("tsd.network.bind", "0.0.0.0");
     default_map.put("tsd.network.worker_threads", "");
     default_map.put("tsd.network.async_io", "true");
@@ -384,17 +425,23 @@ public class Config {
     default_map.put("tsd.network.keep_alive", "true");
     default_map.put("tsd.network.reuse_address", "true");
     default_map.put("tsd.core.auto_create_metrics", "false");
+    default_map.put("tsd.core.auto_create_tagks", "true");
+    default_map.put("tsd.core.auto_create_tagvs", "true");
     default_map.put("tsd.core.meta.enable_realtime_ts", "false");
     default_map.put("tsd.core.meta.enable_realtime_uid", "false");
     default_map.put("tsd.core.meta.enable_tsuid_incrementing", "false");
     default_map.put("tsd.core.meta.enable_tsuid_tracking", "false");
     default_map.put("tsd.core.plugin_path", "");
+    default_map.put("tsd.core.socket.timeout", "0");
     default_map.put("tsd.core.tree.enable_processing", "false");
+    default_map.put("tsd.core.preload_uid_cache", "false");
+    default_map.put("tsd.core.preload_uid_cache.max_entries", "300000");
     default_map.put("tsd.rtpublisher.enable", "false");
     default_map.put("tsd.rtpublisher.plugin", "");
     default_map.put("tsd.search.enable", "false");
     default_map.put("tsd.search.plugin", "");
     default_map.put("tsd.stats.canonical", "false");
+    default_map.put("tsd.storage.fix_duplicates", "false");
     default_map.put("tsd.storage.flush_interval", "1000");
     default_map.put("tsd.storage.hbase.data_table", "tsdb");
     default_map.put("tsd.storage.hbase.uid_table", "tsdb-uid");
@@ -407,26 +454,16 @@ public class Config {
     default_map.put("tsd.http.request.enable_chunked", "false");
     default_map.put("tsd.http.request.max_chunk", "4096");
     default_map.put("tsd.http.request.cors_domains", "");
+    default_map.put("tsd.http.request.cors_headers", "Authorization, "
+      + "Content-Type, Accept, Origin, User-Agent, DNT, Cache-Control, "
+      + "X-Mx-ReqToken, Keep-Alive, X-Requested-With, If-Modified-Since");
 
     for (Map.Entry<String, String> entry : default_map.entrySet()) {
       if (!properties.containsKey(entry.getKey()))
         properties.put(entry.getKey(), entry.getValue());
     }
 
-    // set statics
-    auto_metric = this.getBoolean("tsd.core.auto_create_metrics");
-    enable_compactions = this.getBoolean("tsd.storage.enable_compaction");
-    enable_chunked_requests = this.getBoolean("tsd.http.request.enable_chunked");
-    enable_realtime_ts = this.getBoolean("tsd.core.meta.enable_realtime_ts");
-    enable_realtime_uid = this.getBoolean("tsd.core.meta.enable_realtime_uid");
-    enable_tsuid_incrementing = 
-      this.getBoolean("tsd.core.meta.enable_tsuid_incrementing");
-    enable_tsuid_tracking = 
-      this.getBoolean("tsd.core.meta.enable_tsuid_tracking");
-    if (this.hasProperty("tsd.http.request.max_chunk")) {
-      max_chunked_requests = this.getInt("tsd.http.request.max_chunk");
-    }
-    enable_tree_processing = this.getBoolean("tsd.core.tree.enable_processing");
+    loadStaticVariables();
   }
 
   /**
@@ -442,8 +479,8 @@ public class Config {
    * @throws IOException Thrown if there was an issue reading a file
    */
   protected void loadConfig() throws IOException {
-    if (this.config_location != null && !this.config_location.isEmpty()) {
-      this.loadConfig(this.config_location);
+    if (config_location != null && !config_location.isEmpty()) {
+      loadConfig(config_location);
       return;
     }
 
@@ -469,7 +506,7 @@ public class Config {
         props.load(file_stream);
         
         // load the hash map
-        this.loadHashMap(props);        
+        loadHashMap(props);        
       } catch (Exception e) {
         // don't do anything, the file may be missing and that's fine
         LOG.debug("Unable to find or load " + file, e);
@@ -478,7 +515,7 @@ public class Config {
 
       // no exceptions thrown, so save the valid path and exit
       LOG.info("Successfully loaded configuration file: " + file);
-      this.config_location = file;
+      config_location = file;
       return;
     }
 
@@ -493,34 +530,60 @@ public class Config {
    */
   protected void loadConfig(final String file) throws FileNotFoundException,
       IOException {
-    FileInputStream file_stream;
-    file_stream = new FileInputStream(file);
-    Properties props = new Properties();
-    props.load(file_stream);
-    
-    // load the hash map
-    this.loadHashMap(props);
-
-    // no exceptions thrown, so save the valid path and exit
-    LOG.info("Successfully loaded configuration file: " + file);
-    this.config_location = file;
+    final FileInputStream file_stream = new FileInputStream(file);
+    try {
+      final Properties props = new Properties();
+      props.load(file_stream);
+  
+      // load the hash map
+      loadHashMap(props);
+  
+      // no exceptions thrown, so save the valid path and exit
+      LOG.info("Successfully loaded configuration file: " + file);
+      config_location = file;
+    } finally {
+      file_stream.close();
+    }
   }
 
   /**
-   * Calld from {@link #loadConfig} to copy the properties into the hash map
+   * Loads the static class variables for values that are called often. This
+   * should be called any time the configuration changes.
+   */
+  protected void loadStaticVariables() {
+    auto_metric = this.getBoolean("tsd.core.auto_create_metrics");
+    auto_tagk = this.getBoolean("tsd.core.auto_create_tagks");
+    auto_tagv = this.getBoolean("tsd.core.auto_create_tagvs");
+    enable_compactions = this.getBoolean("tsd.storage.enable_compaction");
+    enable_chunked_requests = this.getBoolean("tsd.http.request.enable_chunked");
+    enable_realtime_ts = this.getBoolean("tsd.core.meta.enable_realtime_ts");
+    enable_realtime_uid = this.getBoolean("tsd.core.meta.enable_realtime_uid");
+    enable_tsuid_incrementing = 
+      this.getBoolean("tsd.core.meta.enable_tsuid_incrementing");
+    enable_tsuid_tracking = 
+      this.getBoolean("tsd.core.meta.enable_tsuid_tracking");
+    if (this.hasProperty("tsd.http.request.max_chunk")) {
+      max_chunked_requests = this.getInt("tsd.http.request.max_chunk");
+    }
+    enable_tree_processing = this.getBoolean("tsd.core.tree.enable_processing");
+    fix_duplicates = this.getBoolean("tsd.storage.fix_duplicates");
+  }
+  
+  /**
+   * Called from {@link #loadConfig} to copy the properties into the hash map
    * Tsuna points out that the Properties class is much slower than a hash
    * map so if we'll be looking up config values more than once, a hash map
    * is the way to go 
    * @param props The loaded Properties object to copy
    */
   private void loadHashMap(final Properties props) {
-    this.properties.clear();
+    properties.clear();
     
     @SuppressWarnings("rawtypes")
     Enumeration e = props.propertyNames();
     while (e.hasMoreElements()) {
       String key = (String) e.nextElement();
-      this.properties.put(key, props.getProperty(key));
+      properties.put(key, props.getProperty(key));
     }
   }
 }
