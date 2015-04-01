@@ -38,3 +38,18 @@ guava-rpm-maker/\.project
 src-main
 src-test
 plugin_test.jar
+
+# building
+third_party
+.gwtc-stamp
+.javac-stamp
+.javac-unittests-stamp
+.staticroot-stamp
+build-aux/fetchdep.sh
+gwt-unitCache/
+gwt/
+manifest
+opentsdb.spec
+staticroot/
+tsdb
+tsdb-*.jar
